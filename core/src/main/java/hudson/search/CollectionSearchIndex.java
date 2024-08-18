@@ -25,10 +25,14 @@
 package hudson.search;
 
 import edu.umd.cs.findbugs.annotations.NonNull;
+import hudson.model.User;
+import hudson.security.ACL;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import jenkins.model.Jenkins;
+import org.acegisecurity.Authentication;
 
 /**
  * {@link SearchIndex} built on a {@link Map}.
@@ -66,16 +70,47 @@ public abstract class CollectionSearchIndex<SMT extends SearchableModelObject> i
         if (isCaseSensitive) {
           token = token.toLowerCase();
         }
+
+        // Determine if the current user should be restricted from seeing other users names
+        boolean restrictUserNames = anonymousUserHasReadOnlyPermission();
+
         for (SMT o : allAsIterable()) {
             String name = getName(o);
             if (isCaseSensitive)
                 name = name.toLowerCase();
-            if (o != null && name.contains(token))
+
+            if (name.contains(token) && (!restrictUserNames || !isUserItem(o)))
                 result.add(o);
         }
     }
 
     protected String getName(SMT o) {
         return o.getDisplayName();
+    }
+
+    protected boolean isUserItem(SMT o) {
+        if (o instanceof User) {
+            return true;
+        }
+        return false;
+    }
+
+    private boolean anonymousUserHasReadOnlyPermission() {
+        // Get the current user's ACL (Access Control List)
+        ACL acl = Jenkins.get().getACL();
+
+        // Get the current user's authentication
+        Authentication authentication = Jenkins.getAuthentication();
+
+        // Check if authentication is null or not
+        if (authentication == null || !authentication.isAuthenticated()) {
+            return acl.hasPermission(Jenkins.getAuthentication(), Jenkins.READ) &&
+                    !acl.hasPermission(Jenkins.getAuthentication(), Jenkins.ADMINISTER);
+        }
+        // Check if the current user is anonymous
+        boolean isAnonymous = "anonymous".equals(authentication.getPrincipal());
+        // Check for read-only permissions and ensure the user is anonymous
+        return isAnonymous && acl.hasPermission(Jenkins.getAuthentication(), Jenkins.READ) &&
+                !acl.hasPermission(Jenkins.getAuthentication(), Jenkins.ADMINISTER);
     }
 }
